@@ -20,6 +20,5 @@ pip install -r requirements.txt
 
 ### Run the Code
 ```
-python test_fire_model.py test_video_1.mp4
-python test_fire_model.py test_video_2.mp4
+python test_fire_model.py test_video.mp4
 ```
