@@ -5,9 +5,9 @@ from PIL import Image
 import os
 import argparse
 from skimage.feature import local_binary_pattern, graycomatrix, graycoprops
-# from scipy.optimize import linear_sum_assignment # Optional for more advanced matching
+# from scipy.optimize import linear_sum_assignment
 
-# --- KalmanTrack Class ---
+# Kalman Filter Tracking
 class KalmanTrack:
     _next_id = 0 
 
@@ -16,7 +16,6 @@ class KalmanTrack:
         self.kf = cv2.KalmanFilter(8, 4)  
         self.dt = dt
 
-        # Transition Matrix (A)
         self.kf.transitionMatrix = np.array([
             [1,0,0,0,dt,0,0,0],
             [0,1,0,0,0,dt,0,0],
@@ -28,7 +27,6 @@ class KalmanTrack:
             [0,0,0,0,0,0,0,1]
         ], np.float32)
 
-        # Measurement Matrix (H)
         self.kf.measurementMatrix = np.array([
             [1,0,0,0,0,0,0,0],
             [0,1,0,0,0,0,0,0],
@@ -36,24 +34,17 @@ class KalmanTrack:
             [0,0,0,1,0,0,0,0]
         ], np.float32)
 
-        # Process Noise Covariance (Q) - uncertainty in model prediction
-        # Tunable: smaller values = smoother, but less responsive to abrupt changes
-        q_pos_comp = 0.05 # Process noise for position components (cx, cy, w, h)
-        q_vel_comp = 0.02 # Process noise for velocity components (vx, vy, vw, vh)
+        q_pos_comp = 0.05
+        q_vel_comp = 0.02
         self.kf.processNoiseCov = np.diag([q_pos_comp**2, q_pos_comp**2, q_pos_comp**2, q_pos_comp**2,
                                            q_vel_comp**2, q_vel_comp**2, q_vel_comp**2, q_vel_comp**2]).astype(np.float32)
 
-
-        # Measurement Noise Covariance (R) - uncertainty in detection
-        # Tunable: smaller values = trust detections more
         r_std = 0.15
-        self.kf.measurementNoiseCov = np.diag([r_std**2, r_std**2, (r_std*1.5)**2, (r_std*1.5)**2]).astype(np.float32) # w,h might be noisier
+        self.kf.measurementNoiseCov = np.diag([r_std**2, r_std**2, (r_std*1.5)**2, (r_std*1.5)**2]).astype(np.float32) 
 
-        # Initial Error Covariance (P) - initial uncertainty of the state
         self.kf.errorCovPost = np.eye(8, dtype=np.float32) * 0.1
-        self.kf.errorCovPost[4:,4:] *= 1000. # Large uncertainty for initial velocities
+        self.kf.errorCovPost[4:,4:] *= 1000. 
 
-        # Initial State (x_k)
         cx, cy, w, h = initial_bbox_cxcywh
         self.kf.statePost = np.array([cx, cy, w, h, 0, 0, 0, 0], np.float32).reshape(8, 1)
         self.kf.statePre = self.kf.statePost.copy()
@@ -64,11 +55,9 @@ class KalmanTrack:
         self.history = [] 
 
     def predict(self):
-        """Predicts the next state. Returns predicted state [cx,cy,w,h,vx,vy,vw,vh]'."""
         return self.kf.predict()
 
     def update(self, measurement_cxcywh):
-        """Updates the track with a new measurement."""
         measurement_vec = np.array(measurement_cxcywh, dtype=np.float32).reshape(4, 1)
         self.kf.correct(measurement_vec)
         self.misses = 0
@@ -76,7 +65,6 @@ class KalmanTrack:
         self.age +=1
 
     def get_state_bbox_cxcywh(self):
-        """Returns the corrected state as [cx, cy, w, h]."""
         state = self.kf.statePost.flatten()
         return state[0], state[1], state[2], state[3]
 
@@ -85,7 +73,6 @@ class KalmanTrack:
         self.hits = 0 
         self.age +=1
 
-# --- Helper Functions ---
 def xywh_to_cxcywh(bbox_xywh):
     x, y, w, h = bbox_xywh
     return np.array([x + w / 2.0, y + h / 2.0, w, h], dtype=np.float32)
@@ -95,7 +82,6 @@ def cxcywh_to_xywh(bbox_cxcywh):
     return np.array([cx - w / 2.0, cy - h / 2.0, w, h], dtype=np.float32)
 
 def calculate_iou(boxA_xywh, boxB_xywh):
-    # Ensure widths and heights are positive
     if boxA_xywh[2] <= 0 or boxA_xywh[3] <= 0 or boxB_xywh[2] <= 0 or boxB_xywh[3] <= 0:
         return 0.0
 
@@ -116,7 +102,7 @@ def calculate_iou(boxA_xywh, boxB_xywh):
     iou = interArea / float(boxAArea + boxBArea - interArea + 1e-6)
     return iou
 
-# --- Feature Extraction (Original) ---
+# Feature Extraction
 def extract_image_features_for_testing(pil_image, previous_pil_image=None, img_size=(128, 128), hof_nbins=8):
     img_resized_pil = pil_image.resize(img_size)
     current_img_np_rgb = np.array(img_resized_pil)
@@ -175,7 +161,7 @@ def extract_image_features_for_testing(pil_image, previous_pil_image=None, img_s
     ))
     return features
 
-# --- ROI Detection Function (Original) ---
+# Deteksi ROI
 def detect_fire_roi(frame_bgr):
     hsv_frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
     lower_red1 = np.array([0, 120, 120])
@@ -207,8 +193,8 @@ def detect_fire_roi(frame_bgr):
                 detected_rois.append((x, y, w, h))
     return detected_rois
 
-# --- Main Function with Kalman Filter and Video Saving ---
-def main(video_path, model_path, scaler_path, output_video_path=None): # Added output_video_path
+# Fungsi Main
+def main(video_path, model_path, scaler_path, output_video_path=None):
     try:
         with open(model_path, 'rb') as f: model = pickle.load(f)
         with open(scaler_path, 'rb') as f: scaler = pickle.load(f)
@@ -228,22 +214,19 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
         print(f"Error: Could not open video {video_path}")
         return
 
-    # Get video properties for VideoWriter
     frame_width_in = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height_in = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps_in = cap.get(cv2.CAP_PROP_FPS)
-    if fps_in == 0: # Fallback if FPS is not available
-        fps_in = 25 # Common FPS, adjust if needed
+    if fps_in == 0: 
+        fps_in = 25 
 
     video_writer = None
     if output_video_path:
-        # Define the codec and create VideoWriter object
-        # Common codecs: 'XVID' for .avi, 'mp4v' for .mp4
         fourcc = None
         if output_video_path.lower().endswith('.avi'):
             fourcc = cv2.VideoWriter_fourcc(*'XVID')
         elif output_video_path.lower().endswith('.mp4'):
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Or 'X264' if available
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
         else:
             print(f"Warning: Unsupported output video format for '{output_video_path}'. Defaulting to .avi with XVID.")
             output_video_path = os.path.splitext(output_video_path)[0] + ".avi"
@@ -255,21 +238,21 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
                 print(f"Output video will be saved to: {output_video_path}")
             else:
                 print(f"Error: Could not open video writer for path: {output_video_path}")
-                video_writer = None # Ensure it's None if not opened
+                video_writer = None 
 
     print(f"Processing video: {video_path}. Press 'q' to quit.")
     cv2.namedWindow("Fire Detection", cv2.WINDOW_AUTOSIZE)
 
     frame_skip = 2
     frame_count = 0
-    display_window_width, display_window_height = 800, 600 # For the display window
+    display_window_width, display_window_height = 800, 600 
     previous_pil_frame = None
 
-    active_tracks = {}  # track_id -> KalmanTrack object
+    active_tracks = {} 
     next_track_id = 0
-    IOU_THRESHOLD = 0.20     # Min IoU to consider a match (tune this)
-    MAX_MISSES = 7          # Max frames a track can be missed before deletion (tune this)
-    MIN_HITS_FOR_STABLE_TRACK = 3 # Min consecutive hits to consider a track stable for display emphasis
+    IOU_THRESHOLD = 0.20     
+    MAX_MISSES = 7          
+    MIN_HITS_FOR_STABLE_TRACK = 3 
 
     while True:
         ret, frame_bgr = cap.read()
@@ -278,23 +261,22 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
             break
 
         frame_count += 1
-        current_processed_frame = frame_bgr.copy() # Use this for processing and saving
+        current_processed_frame = frame_bgr.copy() 
 
         if frame_skip > 0 and frame_count % frame_skip != 0:
-            # Still display the skipped frame, but don't process or save it
             resized_display_skipped = cv2.resize(current_processed_frame, (display_window_width, display_window_height))
             cv2.imshow("Fire Detection", resized_display_skipped)
             if cv2.waitKey(1) & 0xFF == ord('q'): break
             continue
 
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB) # frame_bgr is the original from cap.read()
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         current_pil_image = Image.fromarray(frame_rgb)
 
         features = extract_image_features_for_testing(current_pil_image, previous_pil_frame, img_size=(128,128))
         previous_pil_frame = current_pil_image
 
-        prediction_numeric = -1 # Default: Unknown/No Fire
-        if features.size > 0: # Check if features were extracted
+        prediction_numeric = -1 
+        if features.size > 0: 
             try:
                 scaled_features = scaler.transform(features.reshape(1, -1))
                 prediction_numeric = model.predict(scaled_features)[0]
@@ -303,8 +285,7 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
         else:
             print(f"Warning: No features extracted for frame {frame_count}.")
 
-
-        # --- Kalman Filter Logic ---
+        # Kalman Filter
         predicted_track_states_cxcywh = {}
         for track_id, track in list(active_tracks.items()):
             pred_state_full = track.predict()
@@ -314,7 +295,7 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
             label_text = "Fire Detected in Frame"
             text_color = (0, 0, 255)
 
-            detected_rois_xywh_raw = detect_fire_roi(frame_bgr) # Use original frame_bgr for detection
+            detected_rois_xywh_raw = detect_fire_roi(frame_bgr)
             current_detections_cxcywh = [xywh_to_cxcywh(roi) for roi in detected_rois_xywh_raw]
 
             matched_track_ids_current_frame = set()
@@ -371,7 +352,7 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
                         box_color = (0,0,255)
                         if track.hits >= MIN_HITS_FOR_STABLE_TRACK:
                             box_color = (0,100,255)
-                        cv2.rectangle(current_processed_frame, (x, y), (x + w_draw, y + h_draw), box_color, 2) # Draw on current_processed_frame
+                        cv2.rectangle(current_processed_frame, (x, y), (x + w_draw, y + h_draw), box_color, 2) 
                         cv2.putText(current_processed_frame, f"ID:{track.id}", (x, y - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
                         rois_drawn_this_frame = True
             
@@ -394,11 +375,9 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
                         print(f"Track {track_id}: Removed (frame NoFire & misses {active_tracks[track_id].misses} > {MAX_MISSES})")
                         del active_tracks[track_id]
 
-        # Write the processed frame to video file if VideoWriter is initialized
         if video_writer:
-            video_writer.write(current_processed_frame) # Write the frame with original dimensions
+            video_writer.write(current_processed_frame)
 
-        # Display the frame (potentially resized)
         resized_display = cv2.resize(current_processed_frame, (display_window_width, display_window_height))
         cv2.imshow("Fire Detection", resized_display)
 
@@ -406,12 +385,13 @@ def main(video_path, model_path, scaler_path, output_video_path=None): # Added o
             break
 
     cap.release()
-    if video_writer: # Release the video writer
+    if video_writer:
         video_writer.release()
         print(f"Output video saved to {output_video_path}")
     cv2.destroyAllWindows()
     print("Video processing finished.")
 
+# Menjalankan Program
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test fire detection model on a video (frame-level classification with ROI tracking).")
     parser.add_argument("video_path", help="Path to the input video file.")
